@@ -1,28 +1,58 @@
-version: '3.8'
-
 services:
+  db:
+    image: postgres:15
+    container_name: soar_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: soar_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   api:
     build:
       context: ../backend
+      dockerfile: Dockerfile
     container_name: soar_api
+    restart: unless-stopped
     ports:
       - "8000:8000"
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/soar_db
+      - GOOGLE_CLIENT_SECRET_FILE=client_secret.json
+      - GMAIL_SYNC_FOLDER=INBOX
+      - GOOGLE_TOKEN_DIR=token files
+      - MODEL_ARTIFACT_PATH=artifacts/phishing_model.joblib
+      - VECTORIZER_ARTIFACT_PATH=artifacts/phishing_vectorizer.joblib
+      - TRAINING_DATA_PATH=data/data.csv
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ../backend/token files:/app/token files
+      - ../backend/artifacts:/app/artifacts
+      - ../backend/data:/app/data
+      - ../backend/client_secret.json:/app/client_secret.json
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
     depends_on:
       - db
 
-  db:
-    image: postgres:15
-    container_name: soar_db
-    environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=soar_db
-    ports:
-      - "5432:5432"
-    volumes:
-      - db_data:/var/lib/postgresql/data
-
 volumes:
-  db_data:
+  postgres_data:

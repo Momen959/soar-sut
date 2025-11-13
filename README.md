@@ -11,7 +11,7 @@ This MVP simulates a small SOAR pipeline that:
 
 1. Receives an email via API.
 2. Parses and extracts key fields (sender, recipients, subject, body, URLs, etc.).
-3. Stores email data in **Cassandra**.
+3. Stores email data in **Postgres**.
 4. Runs a lightweight **AI model** to check for suspicious features (starting with spelling analysis).
 5. Returns a JSON response with the classification result.
 
@@ -20,13 +20,13 @@ This MVP simulates a small SOAR pipeline that:
 ## 🧩 Architecture
 
 ```
-User → FastAPI Backend → Cassandra Database + AI Model → JSON Response
+User → FastAPI Backend → Postgres Database + AI Model → JSON Response
 ```
 
 ### Components
 
 * **FastAPI (Backend):** Receives emails and manages API endpoints.
-* **Cassandra (Database):** Stores parsed email data and model results.
+* **PostgreSQL (Database):** Stores parsed email data and model results.
 * **AI Model:** Performs a spelling-based phishing suspicion check.
 * **React Frontend (Later):** Simple dashboard for viewing analysis results.
 
@@ -35,27 +35,21 @@ User → FastAPI Backend → Cassandra Database + AI Model → JSON Response
 ## 🏗️ Folder Structure
 
 ```
-soar-sut/
+soar/
 ├── backend/
-│   ├── app/
-│   │   ├── main.py
-│   │   ├── ai/
-│   │   ├── api/
-│   │   ├── config/
-│   │   ├── services/
-│   │   ├── core/
-│   │   ├── models/
-│   │   └── repository/
-│   ├── .dockerignore  
-│   ├── Dockerfile
-│   └── requirements.txt
-│
+│   └── app/
+│       ├── ai/
+│       ├── client/
+│       ├── config/
+│       ├── controllers/
+│       ├── core/
+│       ├── models/
+│       ├── repository/
+│       └── services/
 ├── data/
-│   └── datasets/ (for training/testing)
-│
+│   └── data.csv
 ├── infra/
-│   └── docker-compose.yml (coming soon)
-│
+│   └── docker-compose.yml
 └── README.md
 ```
 
@@ -66,7 +60,7 @@ soar-sut/
 | Component        | Technology                                        |
 | ---------------- | ------------------------------------------------- |
 | Backend          | FastAPI                                           |
-| Database         | Apache Cassandra                                  |
+| Database         | PostgreSQL                                        |
 | AI Model         | Python (TextBlob / PySpellChecker / Scikit-learn) |
 | Frontend         | React (coming soon)                               |
 | Containerization | Docker / Docker Compose                           |
@@ -97,11 +91,10 @@ pip install -r requirements.txt
 
 ### 4. Set Up Environment Variables
 
-Create a `.env` file inside `backend/` with:
+Copy `backend/env.example` to `backend/.env` and adjust values as needed:
 
 ```
-CASSANDRA_HOST=127.0.0.1
-CASSANDRA_KEYSPACE=soar_db
+cp backend/env.example backend/.env
 ```
 
 ### 5. Run the FastAPI App
@@ -117,7 +110,19 @@ Then visit:
 
 ## 🧠 API Example
 
-### POST `/api/submit_email`
+### Environment Variables
+
+The backend reads configuration via environment variables (loaded from `backend/.env`). The sample file contains:
+
+- `DATABASE_URL`: PostgreSQL connection string.
+- `GOOGLE_CLIENT_SECRET_FILE`: path to your OAuth client JSON.
+- `GMAIL_SYNC_FOLDER`: Gmail label to sync.
+- `GOOGLE_TOKEN_DIR`: directory for cached OAuth tokens.
+- `MODEL_ARTIFACT_PATH`: persisted phishing model file (optional).
+- `VECTORIZER_ARTIFACT_PATH`: persisted TF-IDF vectorizer file (optional).
+- `TRAINING_DATA_PATH`: CSV used when re-training the phishing model.
+
+### POST `/api/emails`
 
 #### Request
 
@@ -135,11 +140,45 @@ Then visit:
 
 ```json
 {
-  "record_id": "12345",
-  "spelling_score": 0.72,
-  "model_label": "suspicious"
+  "record_id": 1,
+  "gmail_id": "manual-2a1e75c98a2247f584e41a5303b0f3c7",
+  "analysis": {
+    "spelling_score": 0.31,
+    "keyword_score": 0.08,
+    "composite_score": 0.196,
+    "model_label": "suspicious"
+  }
 }
 ```
+
+### POST `/api/emails/sync`
+
+Synchronise the configured Gmail inbox with the API. Each message is normalised, analysed, and stored (or updated) in PostgreSQL. Optional `max_results` query parameter lets you cap the batch size.
+
+### GET `/api/emails`
+
+Fetch analysed emails with pagination via `limit` and `offset` query parameters.
+
+### GET `/api/emails/{gmail_id}`
+
+Retrieve a single analysed email by its Gmail ID (or the auto-generated manual ID).
+
+### Training the ML model (optional)
+
+The system ships with a heuristic detector by default. To activate the ML-based classifier, place your dataset at `TRAINING_DATA_PATH` and run a one-off training step (for example via an interactive shell):
+
+```python
+from pathlib import Path
+from app.ai.phishing_model import PhishingDetector
+
+detector = PhishingDetector(
+    model_path=Path("artifacts/phishing_model.joblib"),
+    vectorizer_path=Path("artifacts/phishing_vectorizer.joblib"),
+)
+detector.train(Path("data/data.csv"))
+```
+
+After training, the API automatically loads the persisted artifacts.
 
 ---
 
